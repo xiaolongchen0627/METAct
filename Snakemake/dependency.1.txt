@@ -1,0 +1,4 @@
+bowtie2==2.2.5
+samtools==1.10
+trim-galore==0.6.7
+picard==2.26.3

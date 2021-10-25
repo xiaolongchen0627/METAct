@@ -1,0 +1,12 @@
+{
+    "samples": {
+        "PAVSVG": {
+            "lb": "WTS",
+            "pl": "illumina",
+            "sm": "PAVSVG",
+            "cn": "HA",
+            "read1": "fastq/PAVSVG/PAVSVG_1.fastq.gz",
+            "read2": "fastq/PAVSVG/PAVSVG_2.fastq.gz"
+        }
+    }
+}

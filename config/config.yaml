@@ -1,0 +1,20 @@
+species: "hg38"
+### for bowtie2 mapping parameters
+#bowtie: "bowtie2"
+bt2_l1_idx: "/home/xchen2/FOXR2/L1.reference/L1.consensus"
+bt2_hg38_idx : "/rgs01/applications/hpcf/authorized_apps/cab/Automation/REF/Homo_sapiens/Gencode/r31/bowtie2-index/v2.3.5.1/GRCh38.primary_assembly.genome"
+bt2_thread : 1 
+bt2_l1source_idx : "/home/xchen2/FOXR2/L1.reference/all.Line"
+#### for input files 
+#sample="SJHGG030242_D1"
+#read1="/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.subset.r1.fq"
+#paired="PE"
+#read2="/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.subset.r2.fq"
+#### prefix for output files
+working_dir: "/home/xchen2/FOXR2/hgg.RNA.l1hs" 
+results_dir: "/home/xchen2/FOXR2/hgg.RNA.l1hs/METAct/results"
+### absolute working directory
+##prefix: "METAct" use sample name as prefix name 
+edit_distance: 2 #### for alignment to L1HS sequence 
+units: config/samples.tsv
+L1_psl : "/home/xchen2/FOXR2/rmsk.L1HS.consensus.psl"

@@ -1,0 +1,25 @@
+module load conda3/202105
+
+module load python/3.7.0
+#conda 4.9.2
+#no access to base
+#conda activate base
+
+conda create -n mamba
+conda install -n mamba -c conda-forge mamba
+
+conda activate mamba
+mamba create -c conda-forge -c bioconda -n snakemake snakemake
+
+#conda activate snakemake
+conda activate /home/xchen2/.conda/envs/mamba/envs/snakemake
+
+
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda install samtools==1.10
+conda install -c bioconda bowtie2
+conda install trim-galore==0.6.7
+conda install picard
+#conda install -c bioconda pysam
+pip install pysam --user
