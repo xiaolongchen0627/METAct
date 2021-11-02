@@ -1,13 +1,13 @@
 configfile:"config/config.yaml"
 
 import pandas as pd
-from snakemake.utils import validate
+#from snakemake.utils import validate
 import os
 #import pysam
 
 units = pd.read_table(config["units"]).set_index("sample_name",drop=False)
 
-from function.common_functions import extractSoftclipReads
+import function.common_functions as cf
 
 def is_paired(wildcards):
     if units.loc[wildcards.sample]["paired"] == "Yes" :
@@ -27,17 +27,21 @@ def trim_inputs(wildcards):
         fq_input.append(units.loc[wildcards.sample]["fq2"])
     return fq_input
 
+def hg38_mapping_results(wildcards):
+    hg38_input = [units.loc[wildcards.sample]["bam_2hg38"]]
+    return hg38_input
+
 rule all:  
     input:
-        expand(os.path.join(config["working_dir"],"hg38","{sample}.hg38.sam"),sample=units.sample_name)
+        expand(os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam.bai"),sample=units.sample_name)
 
 rule trim_galore:
     input:
         trim_inputs
     output:
-        temp(os.path.join(config["working_dir"],"trimmed","{sample}_val_1.fq.gz")),
-        temp(os.path.join(config["working_dir"],"trimmed","{sample}_val_2.fq.gz")),
-        temp(os.path.join(config["working_dir"],"trimmed","{sample}_trimmed.fq.gz"))
+        os.path.join(config["working_dir"],"trimmed","{sample}_val_1.fq.gz"),
+        os.path.join(config["working_dir"],"trimmed","{sample}_val_2.fq.gz"),
+        os.path.join(config["working_dir"],"trimmed","{sample}_trimmed.fq.gz")
     params:
         basename = "{sample}",
         trimmed_dir = config["working_dir"]+"/trimmed/",
@@ -83,24 +87,26 @@ rule filter_l1hs_sam_editDistance:
         cmd = "awk '$1 ~ /^@/ || $0 ~ /NM:i:[0-{params.editD}]\t/ ' {input} | "
         cmd += "samtools view -Sb -F 4 - "
         cmd += " -o {output.bam} ;"
-        cmd += "samtools sort {output.bam} {output.bam}.sort ; mv {output.bam}.sort.bam {output.bam}; "
+        cmd += "samtools sort {output.bam} -o {output.bam}.sort ; mv {output.bam}.sort {output.bam}; "
         cmd += "samtools index {output.bam}"
-        print(cmd)
         shell(cmd)
 
 rule extract_sclip2fq:
     input:
         bam=rules.filter_l1hs_sam_editDistance.output.bam
     output:
-        fq=temp(os.path.join(config["working_dir"],"l1hs","{sample}.sclip.fq"))
+        fq=os.path.join(config["working_dir"],"l1hs","{sample}.sclip.fq")
+    params:
+        all_sclip = config['all_sclip'],
+        sclip_length = config['min_sclip_len']
     run:
-        extractSoftclipReads(str(input.bam),str(output.fq))
+        cf.extractSoftclipReads(str(input.bam),str(output.fq),params.all_sclip,params.sclip_length)
 
 rule align_2L1_sources:
     input :
         rules.extract_sclip2fq.output
     output: 
-        fq=temp(os.path.join(config["working_dir"],"l1hs","{sample}.None_L1.fq"))
+        fq=os.path.join(config["working_dir"],"l1hs","{sample}.None_L1.fq")
     params:
         bt2_idx = config['bt2_l1source_idx']
     run: 
@@ -108,10 +114,9 @@ rule align_2L1_sources:
         cmd = " bowtie2 --very-sensitive-local -x {params.bt2_idx} -U {input} -S {output}.sam ;"
         cmd += " samtools view -Sb -f 4 {output}.sam -o {output}.none_l1.bam; "
         cmd += " picard SamToFastq -I {output}.none_l1.bam -F {output.fq} ;"
-        cmd += " rm {output}.none_l1.bam {output}.sam ;"
         shell(cmd)
 
-rule align_2hg38:
+rule realign_2hg38:
     input: 
         rules.align_2L1_sources.output
     output:
@@ -122,21 +127,30 @@ rule align_2hg38:
         cmd = " bowtie2 --very-sensitive-local -x {params.bt2_idx} -U {input} -S {output}"
         shell(cmd)
 
-#rule filter_hg38_sam_editDistance:
-#    input:
-#        rules.align_2hg38.output:
-#    output:
-#        os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam")
-#    params:
-#        psl = config['L1_psl']
-#    run:
-#        cmd = " awk '($1 ~ /_Ci:.{5,6}[SM]$/ && $0 ~ /XM:i:[0-1]/ )' {input} |"
-#        cmd += " | awk 'NR==FNR&&NR>=6
-        cmd += "{split($10,name,".");"
-        cmd += "chr[$10]=name[1];s[$10]=name[2];e[$10]=name[3];n[$10]=name[4];ls[$10]=$15;lend[$10]=$16;print(le); next}"
-        # psl file , blat results of L1PA1 to L1PA7 towards L1HS 
-               chr[$10]=name[1];s[$10]=name[2];e[$10]=name[3];n[$10]=name[4];ls[$10]=$15;lend[$10]=$16;print(le); next} "
+rule filter_hg38_sam:
+    input:
+        rules.realign_2hg38.output
+    output:
+        bam = os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam"),
+        bai = os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam.bai")
+    params:
+        psl = config['L1_psl']
+    run:
+        cf.filter_hg38Sam(input,params.psl,str(output.bam)),
+        cmd = 'samtools sort {output.bam} -o {output.bam}.sort ; mv {output.bam}.sort {output.bam}; '
+        cmd += 'samtools index {output.bam} ' 
+        shell(cmd)
+
+rule score_sam:
+    input:
+        sclipSam = rules.filter_hg38_sam.output,
+        refSam = hg38_mapping_results
+    output:
+        os.path.join(config["working_dir"],"hg38","{sample}.hg38.score.txt")
+    run:
+        cf.score_hg38Sam(sclipSam,refSam,str(output))
+        
 
 
-#awk '($1 ~ /_Ci:.{5,6}[SM]$/ && $0 ~ /XM:i:[0-1]/ )' SJBT031173_D1.hg38.sam | awk 'NR==FNR&&NR>=6{split($10,name,".");chr[$10]=name[1];s[$10]=name[2];e[$10]=name[3];n[$10]=name[4];ls[$10]=$15;lend[$10]=$16;print(le); next} {split($1,tmp,"pos:");split(tmp[2],pos,"_Ci");for(each in chr){if(chr[each]==$3&&$4>=s[each]-10000&&$4<=e[each]+10000&&pos[1]>=ls[each]-200&&pos[1]<=lend[each]+200)print $0"\t"each}}' ~/FOXR2/rmsk.L1HS.consensus.psl -  |grep -v "^$" > tmp1
+        
 
