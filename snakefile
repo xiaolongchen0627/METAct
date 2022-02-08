@@ -1,4 +1,4 @@
-configfile:"config.yaml"
+configfile:"config/config.yaml"
 
 import pandas as pd
 #from snakemake.utils import validate
