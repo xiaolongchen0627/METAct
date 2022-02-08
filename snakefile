@@ -1,4 +1,4 @@
-configfile:"config/config.yaml"
+configfile:"config.yaml"
 
 import pandas as pd
 #from snakemake.utils import validate
@@ -15,7 +15,7 @@ def is_paired(wildcards):
     else:
         return False
 
-def Trimming(wildcards):
+def need_trim(wildcards):
     if units.loc[wildcards.sample]["need_trim"] == "Yes" :
         return True
     else: 
@@ -33,7 +33,7 @@ def hg38_mapping_results(wildcards):
 
 rule all:  
     input:
-        expand(os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam.bai"),sample=units.sample_name)
+        expand(os.path.join(config["working_dir"],"trimmed","{sample}_val_1.fq.gz"),sample=units.sample_name)
 
 rule trim_galore:
     input:
@@ -45,23 +45,44 @@ rule trim_galore:
     params:
         basename = "{sample}",
         trimmed_dir = config["working_dir"]+"/trimmed/",
-        paired = is_paired
+        paired = is_paired,
+        trimmed = need_trim
     run: 
-        cmd = "trim_galore --gzip --output_dir {params.trimmed_dir} --basename {params.basename} "
-        if params.paired:
-            cmd += "--paired {input} ; touch {params.trimmed_dir}/{params.basename}_trimmed.fq.gz"
-        else :
-            cmd += " {input}; touch {params.trimmed_dir}/{params.basename}_val_1.fq.gz;"
-            cmd += "touch {params.trimmed_dir}/{params.basename}_val_2.fq.gz ;"
-        shell(cmd)
+        cmd = ""
+        if params.trimmed:
+            cmd += "trim_galore --gzip --output_dir {params.trimmed_dir} --basename {params.basename} "
+            if params.paired:
+                cmd += "--paired {input} ; touch {params.trimmed_dir}/{params.basename}_trimmed.fq.gz"
+            else :
+                cmd += " {input}; touch {params.trimmed_dir}/{params.basename}_val_1.fq.gz;"
+                cmd += "touch {params.trimmed_dir}/{params.basename}_val_2.fq.gz ;"
+        else:
+            
+            if params.paired:
+                if input[0].endswith('.gz'):                                        
+                    cmd += " ln -s {input[0]} {params.trimmed_dir}/{params.basename}_val_1.fq.gz; "
+                    cmd += " ln -s {input[1]} {params.trimmed_dir}/{params.basename}_val_2.fq.gz; "
+                else:                    
+                    cmd += " gzip -c {input[0]} > {params.trimmed_dir}/{params.basename}_val_1.fq.gz;"
+                    cmd += " gzip -c {input[1]} > {params.trimmed_dir}/{params.basename}_val_2.fq.gz;"
+                cmd += " touch {params.trimmed_dir}/{params.basename}_trimmed.fq.gz; "
+            else:
+                if input[0].endswith('.gz'):
+                    cmd += " ln -s {input[0]} {params.trimmed_dir}/{params.basename}_trimmed.fq.gz;"
+                else : 
+                    cmd += " gzip -c {input[0]} > {params.trimmed_dir}/{params.basename}_trimmed.fq;"
+                cmd += "touch {params.trimmed_dir}/{params.basename}_val_1.fq.gz;"
+                cmd += "touch {params.trimmed_dir}/{params.basename}_val_2.fq.gz;"
 
-rule align_2l1hs:
+        shell(cmd )
+
+rule align2CustomGenome:
     input:
         fq1=os.path.join(config["working_dir"],"trimmed","{sample}_val_1.fq.gz"),
         fq2=os.path.join(config["working_dir"],"trimmed","{sample}_val_2.fq.gz"),
         fqse=os.path.join(config["working_dir"],"trimmed","{sample}_trimmed.fq.gz")
     output:
-        os.path.join(config["working_dir"],"l1hs","{sample}.sam")
+        os.path.join(config["working_dir"],config["customGenomeName"],"{sample}.sam")
     params:
         bt2_thread = config['bt2_thread'],
         bt2_idx = config['bt2_l1_idx'],
@@ -75,17 +96,17 @@ rule align_2l1hs:
         cmd += "-S {output}"
         shell(cmd)
 
-rule filter_l1hs_sam_editDistance:
+rule filter_sam_editDistance:
     input:
-        rules.align_2l1hs.output
+        rules.align2CustomGenome.output
     output:
-        bam=os.path.join(config["working_dir"],"l1hs","{sample}.l1hs.bam"),
-        index=os.path.join(config["working_dir"],"l1hs","{sample}.l1hs.bam.bai")
+        bam=os.path.join(config["working_dir"],config["customGenomeName"],"{sample}.",config["customGenomeName"],".bam"),
+        bai=os.path.join(config["working_dir"],config["customGenomeName"],"{sample}.",config["customGenomeName"],".bam.bai")
     params:
         editD = config['edit_distance']
     run:
         cmd = "awk '$1 ~ /^@/ || $0 ~ /NM:i:[0-{params.editD}]\t/ ' {input} | "
-        cmd += "samtools view -Sb -F 4 - "
+        cmd += "samtools view -Sb -F 4 -q 20 - "
         cmd += " -o {output.bam} ;"
         cmd += "samtools sort {output.bam} -o {output.bam}.sort ; mv {output.bam}.sort {output.bam}; "
         cmd += "samtools index {output.bam}"
@@ -93,32 +114,18 @@ rule filter_l1hs_sam_editDistance:
 
 rule extract_sclip2fq:
     input:
-        bam=rules.filter_l1hs_sam_editDistance.output.bam
+        bam=rules.filter_sam_editDistance.output.bam
     output:
-        fq=os.path.join(config["working_dir"],"l1hs","{sample}.sclip.fq")
+        fq=os.path.join(config["working_dir"],config["customGenomeName"],"{sample}.sclip.fq")
     params:
-        all_sclip = config['all_sclip'],
         sclip_length = config['min_sclip_len']
     run:
-        cf.extractSoftclipReads(str(input.bam),str(output.fq),params.all_sclip,params.sclip_length)
+        cf.extractSoftclipReads(str(input.bam),str(output.fq),params.sclip_length)
 
-rule align_2L1_sources:
-    input :
-        rules.extract_sclip2fq.output
-    output: 
-        fq=os.path.join(config["working_dir"],"l1hs","{sample}.None_L1.fq")
-    params:
-        bt2_idx = config['bt2_l1source_idx']
-    run: 
-        ### only keep the sclip reads that failed to map to other L1 sources
-        cmd = " bowtie2 --very-sensitive-local -x {params.bt2_idx} -U {input} -S {output}.sam ;"
-        cmd += " samtools view -Sb -f 4 {output}.sam -o {output}.none_l1.bam; "
-        cmd += " picard SamToFastq -I {output}.none_l1.bam -F {output.fq} ;"
-        shell(cmd)
 
 rule realign_2hg38:
     input: 
-        rules.align_2L1_sources.output
+        rules.extract_sclip2fq.output
     output:
         os.path.join(config["working_dir"],"hg38","{sample}.hg38.sam")
     params:
@@ -134,22 +141,44 @@ rule filter_hg38_sam:
         bam = os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam"),
         bai = os.path.join(config["working_dir"],"hg38","{sample}.hg38.bam.bai")
     params:
-        psl = config['L1_psl']
+        psl = config['L1_psl'],
+        focus_site = config['interestingSite'],
+        target = config['customGenomeName']
     run:
-        cf.filter_hg38Sam(input,params.psl,str(output.bam)),
+        cf.filter_hg38Sam(input,params.psl,str(output.bam),params.focus_site,params.target),
         cmd = 'samtools sort {output.bam} -o {output.bam}.sort ; mv {output.bam}.sort {output.bam}; '
         cmd += 'samtools index {output.bam} ' 
         shell(cmd)
 
 rule score_sam:
     input:
-        sclipSam = rules.filter_hg38_sam.output,
+        sclipSam = rules.filter_hg38_sam.output.bam,
         refSam = hg38_mapping_results
     output:
-        os.path.join(config["working_dir"],"hg38","{sample}.hg38.score.txt")
+        sam = os.path.join(config["working_dir"],"hg38","{sample}.hg38.rev.sam"),
+        fqname = os.path.join(config["working_dir"],"hg38","{sample}.hg38.rev.fq.name.txt")
     run:
-        cf.score_hg38Sam(sclipSam,refSam,str(output))
+        cf.scoring_alignment(input.refSam,input.sclipSam,str(output.sam))
         
+rule get_fastq_for_validation:
+    input :
+        fq1=rules.align2CustomGenome.input.fq1,
+        fq2=rules.align2CustomGenome.input.fq2,
+        fqname=rules.score_sam.output.fqname
+    params:
+        paired = is_paired
+    output: 
+        fq1 = os.path.join(config["working_dir"],"hg38","{sample}.hg38.rev.r1.fq"),
+        fq2 = os.path.join(config["working_dir"],"hg38","{sample}.hg38.rev.r2.fq")
+    run:
+        cmd = ' '
+        if params.paired:
+            cmd +=" zcat {input.fq1} | grep -f {input.fqname} -A 3 -h  --no-group-separator > {output.fq1};"
+            cmd += " zcat  {input.fq2}  | grep -f {input.fqname} -A 3 -h  --no-group-separator> {output.fq2};"
+        else:
+            cmd += "touch {output.fq1} ;"
+            cmd += "touch {output.fq2} "
+        shell(cmd)
 
 
         

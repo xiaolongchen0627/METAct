@@ -1,3 +1,3 @@
-sample_name	fq1	fq2	paired	need_trim
-SJHGG030242_D1	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.subset.r1.fq	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.subset.r2.fq	Yes	Yes
-SJHGG030851_D1	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030851_D1.r1.fq		No	Yes
+sample_name	fq1	fq2	paired	need_trim	bam_2hg38
+SJHGG030242_D1	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.r1.fq	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030242_D1.r2.fq	Yes	Yes	/rgs01/reference/restricted/ClinicalGenomics/GRCh38/G4K/FINAL/TRANSCRIPTOME/BAM/SJHGG030242_D1.RNA-Seq.bam
+SJHGG030851_D1	/home/xchen2/FOXR2/hgg.RNA.l1hs/SJHGG030851_D1.r1.fq		No	Yes	/rgs01/reference/restricted/ClinicalGenomics/GRCh38/RTCG/FINAL/TRANSCRIPTOME/BAM/SJHGG030851_D1.RNA-Seq.bam
