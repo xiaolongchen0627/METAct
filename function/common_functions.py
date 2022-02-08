@@ -54,32 +54,39 @@ def extractSoftclipReads(bamfile,sclipfile,sclip_len=20):
 	sclipOut.write(fq)
 	sclipOut.close()
 
-def filter_hg38Sam(sam_file,psl_file,output_file):
+def filter_hg38Sam(sam_file,psl_file,output_file,focus_site = 97,target = 'L1HS' ):
     psl = open(psl_file, 'r')
     #header_list=["match","mis_Match","rep_Match","Ns","Q_Gap_count","Q_Gap_bases",
     #"T_Gap_count","T_Gap_bases","strand","Q_Name","Q_Size","Q_Start","Q_End",
     #"T_Name","T_Size","T_Start","T_End","block_Count","blockSizes","qStarts","tStarts"]
-    psl = pd.read_csv(psl,sep="\t",low_memory=False)
-    Q_Name_info = psl["Q_Name"].str.split("\\.",expand=True)
-    psl["Q_Name_Chr"] = Q_Name_info[0]
-    psl["Q_Name_Start"] = [int(i) for i in Q_Name_info[1]]
-    psl["Q_Name_End"] = [int(i) for i in Q_Name_info[2]]
-    psl["Q_Name_ID"] = Q_Name_info[3]
-    psl["Q_Name_Strand"] = Q_Name_info[4] 
-    #print(["Q_Name_Strand"])
+    try : 
+    	focus_site = int(focus_site)
+    except:
+    	focus_site = 'all'
+    if target.upper() == 'L1HS':
+    	psl = pd.read_csv(psl,sep="\t",low_memory=False)
+    	Q_Name_info = psl["Q_Name"].str.split("\\.",expand=True)
+    	psl["Q_Name_Chr"] = Q_Name_info[0]
+    	psl["Q_Name_Start"] = [int(i) for i in Q_Name_info[1]]
+    	psl["Q_Name_End"] = [int(i) for i in Q_Name_info[2]]
+    	psl["Q_Name_ID"] = Q_Name_info[3]
+    	psl["Q_Name_Strand"] = Q_Name_info[4] 
+    
     samfile=open(str(sam_file),'r')
     samfile=pysam.AlignmentFile(samfile,'r')
     output = pysam.AlignmentFile(output_file,'wb',template=samfile)
     for read in samfile.fetch():        
         if read.has_tag("NM") and ((read.get_tag("NM") == 1) or (read.get_tag("NM") == 0)) : 
             read_str = str(read).split()
+            qual=[int(i) for i in read.query_qualities]
+			qual = round(sum(qual)/len(qual),2)
             cigar = read_str[5]
             sclip = [int(i) for i in re.findall('(\d+)S',cigar)]
             Mapped_reads_len = [int(i) for i in re.findall('(\d+)M',cigar)][0]
             Qname = read.qname
             Pos = int(read.pos)
             flag = read.flag
-            BP= Pos if (flag&16 == 0 ) else Pos + Mapped_reads_len ### BreakPoints from the alignments.
+            BP = Pos if (flag&16 == 0 ) else Pos + Mapped_reads_len ### BreakPoints from the alignments.
             if (not re.findall("[ID]",cigar)):	
             	if (len(sclip)<=1):
             		sclip_len = 0 if len(sclip) == 0 else sclip[0]
@@ -87,15 +94,28 @@ def filter_hg38Sam(sam_file,psl_file,output_file):
             			rname = samfile.getrname(read.rname)
             			pos = int(read.pos)	
             			read_l1hs_pos = int(re.findall("pos:(\d*)_cigar",read_str[0])[0])
-            			if read_l1hs_pos == 97 :  ###only extract 97SD for now 
-	            			subset_psl = psl[(psl["Q_Name_Chr"] == rname) & (psl["Q_Name_Start"] >= pos - 20000) & (psl["Q_Name_End"] <= pos + 20000) & ( read_l1hs_pos >= psl["T_Start"] ) & (read_l1hs_pos <= psl["T_End"])]
-	            			#read.tags = read.tags+[("L1",len(subset_psl))] #####
-	            			L1_within = psl[(psl["Q_Name_Chr"] == rname) & (pos >= psl["Q_Name_Start"]) & (pos <=psl["Q_Name_End"])]
-	            			read.tags = read.tags+[('BP',BP)] ######breakpoints of sclip reads
-	            			read.tags = read.tags+[("OD",":".join(subset_psl["Q_Name_ID"]))]  ########old L1s 
-	            			read.tags = read.tags+[("WI",":".join(L1_within["Q_Name_ID"]))] ###### if there is anything within the 
-	            			# L1 tag indicating there is potential a polymophic Line1 nearby.           
+            			if focus_site != 'all':
+            				if abs(read_l1hs_pos - focus_site) > 5 :  ###only extract 97 SD for now . and allow a few ambiguity 
+            					continue
+            				else :
+            					if target.upper() == 'L1HS':
+	            					subset_psl = psl[(psl["Q_Name_Chr"] == rname) & (psl["Q_Name_Start"] >= pos - 20000) & (psl["Q_Name_End"] <= pos + 20000) & ( read_l1hs_pos >= psl["T_Start"] ) & (read_l1hs_pos <= psl["T_End"])]
+	            					L1_within = psl[(psl["Q_Name_Chr"] == rname) & (pos >= psl["Q_Name_Start"]) & (pos <=psl["Q_Name_End"])]
+	            					read.tags = read.tags+[("OD",":".join(subset_psl["Q_Name_ID"]))]  ######## older L1s 
+	            					read.tags = read.tags+[("WI",":".join(L1_within["Q_Name_ID"]))] ###### if there is anything within one of the older L1s
+	            				read.tags = read.tags+[('BP',BP)] ######breakpoints of sclip reads         
+	            				read.tags = read.tags+[("AQ",qual)] ########### Average Quality of sclip reads 	            			
+	            				output.write(read)
+	            		else:
+	            			if target.upper() == 'L1HS':
+	            				subset_psl = psl[(psl["Q_Name_Chr"] == rname) & (psl["Q_Name_Start"] >= pos - 20000) & (psl["Q_Name_End"] <= pos + 20000) & ( read_l1hs_pos >= psl["T_Start"] ) & (read_l1hs_pos <= psl["T_End"])]
+	            				L1_within = psl[(psl["Q_Name_Chr"] == rname) & (pos >= psl["Q_Name_Start"]) & (pos <=psl["Q_Name_End"])]
+	            				read.tags = read.tags+[("OD",":".join(subset_psl["Q_Name_ID"]))]  ######## older L1s 
+	            				read.tags = read.tags+[("WI",":".join(L1_within["Q_Name_ID"]))] ###### if there is anything within one of the older L1s
+	            			read.tags = read.tags+[('BP',BP)] ######breakpoints of sclip reads         
+	            			read.tags = read.tags+[("AQ",qual)] ########### Average Quality of sclip reads 	            			
 	            			output.write(read)
+
     samfile.close()
     output.close()
 
